@@ -4,27 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Stardew Valley MCP Bridge - A hybrid AI-controlled game mod that bridges Stardew Valley with AI assistants via the Model Context Protocol (MCP). Enables autonomous AI agents to control and play Stardew Valley through:
-- A C# SMAPI mod running inside the game
-- A Go MCP server that communicates with GitHub Copilot SDK (Claude Sonnet)
+Stardew Valley MCP Bridge - A hybrid AI-controlled game mod that bridges Stardew Valley with AI pipelines. Enables autonomous AI agents to control and play Stardew Valley through:
+- A C# SMAPI mod running inside the game (serialiizes state, executes commands, hosts WebSocket via System.Net.WebSockets)
+- A Python bridge (`stardew_bridge`) that exposes game actions as typed tools over MCP or OpenAI-compatible function calling
 - WebSocket-based real-time game state synchronization
 
 ## Build Commands
 
 ### C# Mod (SMAPI)
+Build with a .NET SDK that targets `net6.0` (a .NET 8 SDK is recommended for the ModBuildConfig analyzer). `<GamePath>` in `StardewMCP.csproj` points at the game install; build auto-deploys to `Mods\StardewMCP\`.
 ```bash
-cd mod/StardewMCP
-dotnet build                    # Compile to StardewMCP.dll
+dotnet build mod/StardewMCP/StardewMCP.csproj
 ```
+Launch the game via `StardewModdingAPI.exe` (not the base game exe) to load SMAPI + mods; the mod binds `ws://localhost:8765/game`.
 
-### Go MCP Server
+### Python Bridge
 ```bash
-cd mcp-server
-go build -o stardew-mcp         # Compile binary
-./stardew-mcp                   # Run with default settings
-./stardew-mcp -auto=false       # Connect without starting autonomous agent
-./stardew-mcp -goal "Clear the farm" -url ws://localhost:8765/game
+cd bridge
+python -m venv .venv
+.venv/Scripts/pip install -e ".[mcp,tests]"     # mac/linux: .venv/bin/pip
+.venv/Scripts/python -m stardew_bridge.cli --mode tools        # print OpenAI tool schemas
+.venv/Scripts/python -m stardew_bridge.cli --mode agent --goal "..."  # autonomous loop
+.venv/Scripts/python -m stardew_bridge.cli --mode mcp           # MCP server
+.venv/Scripts/python -m stardew_bridge.cli --mode http          # HTTP/OpenAI-style tool server
 ```
+Configure the LLM via `STARDEW_LLM_BASE_URL`/`STARDEW_LLM_API_KEY`/`STARDEW_MODEL` (any OpenAI-compatible endpoint).
 
 ## Architecture
 
@@ -32,20 +36,19 @@ go build -o stardew-mcp         # Compile binary
 ┌─────────────────────────────────────────────────────────┐
 │ STARDEW VALLEY (Game)                                   │
 │   SMAPI Mod (C# .NET 6)                                 │
-│     ModEntry → GameStateSerializer                      │
+│     ModEntry → GameStateSerializer (mod-aware state)    │
 │              → CommandExecutor (w/ Pathfinder)          │
-│              → WebSocketServer                          │
+│              → WebSocketServer (System.Net.WebSockets)  │
 └─────────────────────────────────────────────────────────┘
               ↕ ws://localhost:8765/game
 ┌─────────────────────────────────────────────────────────┐
-│ MCP Server (Go)                                         │
-│   GameClient: WebSocket connection, state tracking      │
-│   StardewAgent: 12 tools, autonomous loop, LLM calls    │
+│ Python Bridge (stardew_bridge)                          │
+│   GameClient (WebSocket, state, response correlation)   │
+│   Tool Registry: 12 standard + ~50 cheat tools          │
+│   Brain: targeting, walkability, context formatting     │
+│   adapters: MCP server • HTTP/OpenAI tools • agent loop │
 └─────────────────────────────────────────────────────────┘
-              ↕ Copilot SDK
-┌─────────────────────────────────────────────────────────┐
-│ Claude Sonnet (via GitHub Copilot SDK)                  │
-└─────────────────────────────────────────────────────────┘
+              ↕ MCP or OpenAI-compatible tool calling (any provider)
 ```
 
 ### C# Mod Components (`mod/StardewMCP/`)
@@ -56,15 +59,19 @@ go build -o stardew-mcp         # Compile binary
 
 - **GameStateSerializer.cs**: Captures complete game state: Player, Time, World, Surroundings. Generates 61x61 ASCII map vision (30-tile scan radius). Serializes NPCs, items, terrain, quests, relationships, skills.
 
-- **WebSocketServer.cs**: Server on `ws://localhost:8765/game`. Message types: "command", "get_state", "ping". Response types: "state", "response", "error", "pong".
+- **WebSocketServer.cs**: Server on `ws://localhost:8765/game` using `System.Net.WebSockets` over an `HttpListener`. Message types: "command", "get_state", "ping". Response types: "state", "response", "error", "pong". Thread-safe, serialized sends.
 
 - **Pathfinder.cs**: A* algorithm for navigation. 4-directional movement, 50,000 iteration limit, Manhattan distance heuristic. Checks walkability across tiles, objects, terrain features, buildings, furniture, water.
 
-### Go MCP Server Components (`mcp-server/`)
+### Python Bridge Components (`bridge/`)
 
-- **main.go**: GameClient WebSocket manager with reconnection logic (5-second retry). GameState struct definitions for all game entities. Keep-alive pings every 15 seconds, 15-second command timeout.
-
-- **copilot_agent.go**: StardewAgent using GitHub Copilot SDK. 12 standard tools (move_to, get_surroundings, interact, use_tool, use_tool_repeat, face_direction, select_item, switch_tool, eat_item, enter_door, find_best_target, clear_target) plus 30+ cheat mode tools. Contains embedded game knowledge (ASCII map legend, seed IDs, survival rules). Autonomous loop with emergency handling (time/energy checks), 60-second LLM call timeout.
+- **ws_client.py**: Async `GameClient` — connect/reconnect, 15s keepalive, per-command responses correlated by `id` (15s timeout), waits for the first state snapshot.
+- **models.py**: Pydantic models mirroring the game's camelCase state (player, surroundings, tile in front, activeMods, legend).
+- **tools/**: Single declarative typed tool registry (12 standard + ~50 cheat tools). Each tool defined once, surfaced as MCP and OpenAI functions.
+- **brain.py**: Targeting, structured walkability, blocking `move_to`, `clear_target`, LLM context formatting.
+- **knowledge.py**: Embedded game knowledge (legend, seed IDs, survival rules) + dynamic prompt builder (injects legend + active mods).
+- **mcp.py / http_adapter.py**: MCP server (lazy `mcp` import) and HTTP adapter (`/v1/tools`, `/v1/tool`) from the shared registry.
+- **llm.py / agent.py**: Provider-agnostic client (any OpenAI-compatible endpoint) + optional autonomous loop.
 
 ## WebSocket Protocol
 
@@ -85,7 +92,8 @@ go build -o stardew-mcp         # Compile binary
 - **Path recalculation**: Up to 5 attempts if initial pathfinding fails
 - **Tool cooldown**: 30-tick gaps between tool swings (0.5s at 60fps)
 - **Mutex-protected tool execution**: Prevents concurrent tool usage in agent
-- **Embedded knowledge base**: Game mechanics, seed IDs, and survival rules baked into copilot_agent.go
+- **Embedded knowledge base**: Game mechanics, seed IDs, and survival rules baked into the bridge's knowledge.py
+- **Mod-aware state**: The mod emits `activeMods` + a live ASCII `legend`, and agents read structured passability flags, so play works with extra mods installed.
 
 ## Cheat Mode
 

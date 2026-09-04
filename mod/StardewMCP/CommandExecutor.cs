@@ -3330,6 +3330,9 @@ public class CommandExecutor
             }
         }
 
+        int totalCraftingRecipes = Game1.player.craftingRecipes.Count();
+        int totalCookingRecipes = Game1.player.cookingRecipes.Count();
+
         return new CommandResponse
         {
             Id = command.Id,
@@ -3339,8 +3342,8 @@ public class CommandExecutor
             {
                 ["craftingRecipesAdded"] = craftingAdded,
                 ["cookingRecipesAdded"] = cookingAdded,
-                ["totalCraftingRecipes"] = Game1.player.craftingRecipes.Count,
-                ["totalCookingRecipes"] = Game1.player.cookingRecipes.Count
+                ["totalCraftingRecipes"] = totalCraftingRecipes,
+                ["totalCookingRecipes"] = totalCookingRecipes
             }
         };
     }

@@ -22,6 +22,31 @@ public class GameStateSerializer
 {
     private const int ScanRadius = 30; // Tiles to scan around player (matches agent's 61x61 vision)
     private CommandExecutor? _commandExecutor;
+    private List<string> _activeMods = new();
+
+    // Legend describing the ASCII map characters (self-describing for AI under mods).
+    private static readonly Dictionary<string, string> Legend = new()
+    {
+        ["@"] = "The player",
+        ["."] = "Blank ground (walkable)",
+        ["#"] = "Wall/building/impassable (blocked)",
+        ["~"] = "Water (blocked)",
+        ["T"] = "Tree/bush (chop with Axe)",
+        ["O"] = "Object/stone/debris (break with Pickaxe/Axe/Scythe)",
+        ["C"] = "Crop (do not trample)",
+        ["H"] = "Hoe dirt (walkable)",
+        ["\""] = "Grass (cut with Scythe, 0 energy)",
+        [">"] = "Warp/door/entrance",
+        [";"] = "Artifact spot (use Hoe)",
+        ["!"] = "NPC",
+        ["M"] = "Monster"
+    };
+
+    /// <summary>Set the list of loaded mods so the AI knows about modded content.</summary>
+    public void SetActiveMods(IEnumerable<string> modNames)
+    {
+        _activeMods = modNames?.Distinct().ToList() ?? new List<string>();
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -71,7 +96,8 @@ public class GameStateSerializer
             Map = GetMapInfo(location),
             Quests = GetActiveQuests(player),
             Relationships = GetRelationships(player),
-            Skills = GetSkills(player)
+            Skills = GetSkills(player),
+            ActiveMods = _activeMods
         };
     }
 
@@ -223,7 +249,8 @@ public class GameStateSerializer
             NearbyBuildings = GetNearbyBuildings(location, playerX, playerY),
             NearbyAnimals = GetNearbyAnimals(location, playerX, playerY),
             WarpPoints = GetWarpPoints(location),
-            TileInFront = GetTileInFront(location, playerX, playerY, Game1.player.FacingDirection)
+            TileInFront = GetTileInFront(location, playerX, playerY, Game1.player.FacingDirection),
+            Legend = Legend
         };
     }
 
@@ -1391,6 +1418,7 @@ public class GameState
     public List<QuestInfo> Quests { get; set; } = new();
     public List<RelationshipInfo> Relationships { get; set; } = new();
     public SkillsInfo Skills { get; set; } = new();
+    public List<string> ActiveMods { get; set; } = new();
 }
 
 public class QuestInfo
@@ -1491,6 +1519,7 @@ public class SurroundingsState
     public List<NearbyAnimal> NearbyAnimals { get; set; } = new();
     public List<WarpPoint> WarpPoints { get; set; } = new();
     public TileInFront TileInFront { get; set; } = new();
+    public Dictionary<string, string> Legend { get; set; } = new();
 }
 
 public class MapInfo

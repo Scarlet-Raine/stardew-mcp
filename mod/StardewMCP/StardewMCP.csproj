@@ -5,10 +5,12 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <BundleExtraAssemblies>ThirdParty</BundleExtraAssemblies>
+    <!-- Path to the local Stardew Valley install used by ModBuildConfig.
+         Remove/adjust if ModBuildConfig auto-detects your install. -->
+    <GamePath>C:\Program Files (x86)\Steam\steamapps\common\Stardew Valley</GamePath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.*" />
-    <PackageReference Include="WebSocketSharp-netstandard" Version="1.0.1" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,8 @@
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using System;
+using System.Linq;
 
 namespace StardewMCP;
 
@@ -34,6 +36,20 @@ public class ModEntry : Mod
 
     private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
     {
+        // Record which mods (and content packs) are loaded so the AI can adapt to modded content.
+        try
+        {
+            var modNames = Helper.ModRegistry.GetAll()
+                .Select(m => m.Manifest.Name + " (" + m.Manifest.UniqueID + ")")
+                .ToList();
+            _stateSerializer?.SetActiveMods(modNames);
+            Monitor.Log($"Detected {modNames.Count} loaded mods for mod-aware state.", LogLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            Monitor.Log($"Could not query mod registry: {ex.Message}", LogLevel.Warn);
+        }
+
         Monitor.Log("Game launched, starting WebSocket server on port 8765...", LogLevel.Info);
         _wsServer?.Start(8765);
     }
